@@ -2,6 +2,15 @@
 
 A local-first RAG research paper reader. Upload a PDF, chat with it, get math explained, and dive deep into concepts, entirely offline.
 
+<p align="center">
+  <img src="justanimg.png" width="800" alt="Verso empty state" />
+</p>
+
+<p align="center">
+  <img src="img.png" width="800" alt="Verso chat with a paper" />
+</p>
+
+
 ## Features
 
 - **Chat with any paper** - ask questions, get answers grounded in the actual PDF content with page citations
