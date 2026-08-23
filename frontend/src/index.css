@@ -212,7 +212,33 @@ button { font-family: inherit; }
 }
 .chat-input button:hover:not(:disabled) { background: var(--accent-hover); }
 .chat-input button:disabled { opacity: 0.4; cursor: default; }
-.chat-input-hint { text-align: center; font-size: 0.68rem; color: var(--text-faint); padding-bottom: 0.6rem; }
+.chat-input button.stop-btn { background: #b5453a; }
+.chat-input button.stop-btn:hover { background: #c9564a; }
+
+.chat-toolbar-row { padding: 0.4rem 0.75rem 0; display: flex; gap: 0.4rem; }
+.web-toggle {
+  background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-muted);
+  border-radius: 999px; padding: 0.3rem 0.7rem; font-size: 0.72rem; cursor: pointer;
+}
+.web-toggle:hover { border-color: var(--accent); }
+.web-toggle.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+
+.sources-chip.web { border-color: #3a5a4a; }
+
+.edit-box { width: 100%; display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-end; }
+.edit-box textarea {
+  width: 100%; background: var(--bg-elevated); color: var(--text); border: 1px solid var(--accent);
+  border-radius: var(--radius-md); padding: 0.6rem 0.8rem; font-size: 0.88rem; font-family: inherit;
+  resize: vertical; outline: none;
+}
+.edit-actions { display: flex; gap: 0.4rem; }
+.edit-cancel, .edit-send {
+  border: none; border-radius: 999px; padding: 0.35rem 0.9rem; font-size: 0.78rem; cursor: pointer; font-weight: 600;
+}
+.edit-cancel { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border); }
+.edit-cancel:hover { color: var(--text); }
+.edit-send { background: var(--accent); color: var(--accent-text); }
+.edit-send:hover { background: var(--accent-hover); }
 
 /* ---- Notes full panel ---- */
 .notes-panel-full { flex: 1; display: flex; flex-direction: column; min-height: 0; }

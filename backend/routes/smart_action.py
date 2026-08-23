@@ -1,9 +1,10 @@
 """POST /smart-action — SSE-streamed response for text-selection actions
-(Explain Simply/Math, Derive, Intuition, Analogy)."""
+(Explain Simply/Math, Derive, Intuition, Analogy). Same disconnect-aware
+cancellation as /chat."""
 
 import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from models.schemas import SmartActionRequest
@@ -17,9 +18,14 @@ def _sse_format(event: dict) -> str:
 
 
 @router.post("/smart-action")
-async def smart_action(req: SmartActionRequest):
-    def event_stream():
-        for event in run_smart_action(req.paper_id, req.selected_text, req.action, model=req.model):
+async def smart_action(req: SmartActionRequest, request: Request):
+    def _stream():
+        return run_smart_action(req.paper_id, req.selected_text, req.action, model=req.model)
+
+    async def event_stream():
+        async for event in _stream():
+            if await request.is_disconnected():
+                break
             yield _sse_format(event)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

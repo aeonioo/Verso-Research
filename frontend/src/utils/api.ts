@@ -7,8 +7,15 @@ export interface SourceChunk {
   score: number;
 }
 
+export interface WebSource {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
 export type SSEEvent =
   | { type: "sources"; data: SourceChunk[] }
+  | { type: "web_sources"; data: WebSource[] }
   | { type: "token"; data: string }
   | { type: "done"; data: null };
 
@@ -30,52 +37,12 @@ export async function uploadPaper(file: File) {
   }>;
 }
 
-/** Streams SSE events from /chat, calling onEvent for each one as it arrives. */
-export async function streamChat(
-  params: { paper_id: string; message: string; mode: string; thread_id?: string | null; model?: string },
-  onEvent: (event: SSEEvent) => void
-) {
-  const res = await fetch(`${BASE_URL}/chat`, {
+async function _streamSSE(url: string, body: object, onEvent: (e: SSEEvent) => void, signal?: AbortSignal) {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  if (!res.body) throw new Error("No response body");
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() ?? "";
-
-    for (const part of parts) {
-      const line = part.trim();
-      if (!line.startsWith("data:")) continue;
-      const jsonStr = line.slice(5).trim();
-      try {
-        onEvent(JSON.parse(jsonStr) as SSEEvent);
-      } catch {
-        // ignore malformed partial chunk
-      }
-    }
-  }
-}
-
-/** Streams SSE events from /smart-action (Explain/Derive/etc on selected text). */
-export async function streamSmartAction(
-  params: { paper_id: string; selected_text: string; action: string; thread_id?: string | null; model?: string },
-  onEvent: (event: SSEEvent) => void
-) {
-  const res = await fetch(`${BASE_URL}/smart-action`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(body),
+    signal,
   });
   if (!res.body) throw new Error("No response body");
 
@@ -101,6 +68,31 @@ export async function streamSmartAction(
       }
     }
   }
+}
+
+/** Streams SSE events from /chat. Pass `signal` (from an AbortController) to allow stopping generation. */
+export async function streamChat(
+  params: {
+    paper_id: string;
+    message: string;
+    mode: string;
+    thread_id?: string | null;
+    model?: string;
+    use_web?: boolean;
+  },
+  onEvent: (event: SSEEvent) => void,
+  signal?: AbortSignal
+) {
+  await _streamSSE(`${BASE_URL}/chat`, params, onEvent, signal);
+}
+
+/** Streams SSE events from /smart-action (Explain/Derive/etc on selected text). */
+export async function streamSmartAction(
+  params: { paper_id: string; selected_text: string; action: string; thread_id?: string | null; model?: string },
+  onEvent: (event: SSEEvent) => void,
+  signal?: AbortSignal
+) {
+  await _streamSSE(`${BASE_URL}/smart-action`, params, onEvent, signal);
 }
 
 // ---- Threads ----
@@ -133,6 +125,16 @@ export async function promoteMessage(paper_id: string, thread_id: string, messag
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ paper_id, thread_id, message_id }),
+  });
+  return res.json();
+}
+
+/** Drops persisted thread messages from `keep_count` onward — used before resending an edited message. */
+export async function truncateThread(paper_id: string, thread_id: string, keep_count: number) {
+  const res = await fetch(`${BASE_URL}/threads/${paper_id}/${thread_id}/truncate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keep_count }),
   });
   return res.json();
 }

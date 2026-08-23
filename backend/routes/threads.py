@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 
 from config import settings
-from models.schemas import ThreadCreateRequest, ThreadPromoteRequest
+from models.schemas import ThreadCreateRequest, ThreadPromoteRequest, TruncateThreadRequest
 
 router = APIRouter()
 
@@ -134,3 +134,22 @@ def promote_message(req: ThreadPromoteRequest):
     # main chat is just thread_id=None -> stored under a reserved "main" thread id
     append_message(req.paper_id, "main", "assistant", message["content"])
     return {"status": "promoted"}
+
+
+@router.post("/threads/{paper_id}/{thread_id}/truncate")
+def truncate_thread(paper_id: str, thread_id: str, req: TruncateThreadRequest):
+    """Drop all persisted messages from keep_count onward — used when the
+    user edits a past message, so regenerating doesn't see the stale tail."""
+    path = _thread_path(paper_id, thread_id)
+    if not os.path.exists(path):
+        return {"status": "no-op", "remaining": 0}  # nothing persisted yet, fine
+
+    with open(path) as f:
+        thread = json.load(f)
+
+    thread["messages"] = thread["messages"][: req.keep_count]
+
+    with open(path, "w") as f:
+        json.dump(thread, f)
+
+    return {"status": "truncated", "remaining": len(thread["messages"])}

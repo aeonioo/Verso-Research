@@ -15,6 +15,7 @@ class ChatRequest(BaseModel):
     mode: str = "research"  # "eli5" | "exam" | "research"
     thread_id: str | None = None  # None = main chat
     model: str | None = None  # None = use server default (OLLAMA_MODEL)
+    use_web: bool = False  # opt-in: pulls in live web search results (breaks 100%-local for this message only)
 
 
 class SourceChunk(BaseModel):
@@ -41,6 +42,10 @@ class ThreadPromoteRequest(BaseModel):
     paper_id: str
     thread_id: str
     message_id: str
+
+
+class TruncateThreadRequest(BaseModel):
+    keep_count: int  # keep only the first N persisted messages, drop the rest
 
 
 class NoteCreateRequest(BaseModel):

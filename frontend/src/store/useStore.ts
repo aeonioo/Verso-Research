@@ -1,10 +1,11 @@
 import { create } from "zustand";
-import type { SourceChunk } from "../utils/api";
+import type { SourceChunk, WebSource } from "../utils/api";
 
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources?: SourceChunk[];
+  webSources?: WebSource[];
 }
 
 export interface Thread {
@@ -43,9 +44,11 @@ interface VersoState {
   mode: "eli5" | "exam" | "research";
   model: string;
   availableModels: string[];
+  useWeb: boolean;
   activeThreadId: string | null; // null = main chat
   messages: ChatMessage[];
   isStreaming: boolean;
+  abortController: AbortController | null;
 
   threads: Thread[];
   notes: Note[];
@@ -59,11 +62,16 @@ interface VersoState {
   setMode: (mode: VersoState["mode"]) => void;
   setModel: (model: string) => void;
   setAvailableModels: (models: string[]) => void;
+  setUseWeb: (v: boolean) => void;
   setActiveThread: (threadId: string | null) => void;
   addMessage: (msg: ChatMessage) => void;
   appendToLastMessage: (delta: string) => void;
   setLastMessageSources: (sources: SourceChunk[]) => void;
+  setLastMessageWebSources: (sources: WebSource[]) => void;
+  truncateMessages: (index: number) => void;
   setStreaming: (v: boolean) => void;
+  setAbortController: (c: AbortController | null) => void;
+  stopStreaming: () => void;
   resetMessages: () => void;
 
   setThreads: (threads: Thread[]) => void;
@@ -72,7 +80,7 @@ interface VersoState {
   setSelection: (sel: Selection | null) => void;
 }
 
-export const useStore = create<VersoState>((set) => ({
+export const useStore = create<VersoState>((set, get) => ({
   papers: [],
   activePaperId: null,
   sidePanelView: "chat",
@@ -81,9 +89,11 @@ export const useStore = create<VersoState>((set) => ({
   mode: "research",
   model: "qwen3:1.7b",
   availableModels: [],
+  useWeb: false,
   activeThreadId: null,
   messages: [],
   isStreaming: false,
+  abortController: null,
 
   threads: [],
   notes: [],
@@ -108,6 +118,7 @@ export const useStore = create<VersoState>((set) => ({
   setMode: (mode) => set({ mode }),
   setModel: (model) => set({ model }),
   setAvailableModels: (availableModels) => set({ availableModels }),
+  setUseWeb: (useWeb) => set({ useWeb }),
   setActiveThread: (activeThreadId) => set({ activeThreadId, messages: [] }),
 
   addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
@@ -132,7 +143,23 @@ export const useStore = create<VersoState>((set) => ({
       return { messages };
     }),
 
+  setLastMessageWebSources: (webSources) =>
+    set((s) => {
+      const messages = [...s.messages];
+      const last = messages[messages.length - 1];
+      if (last && last.role === "assistant") {
+        messages[messages.length - 1] = { ...last, webSources };
+      }
+      return { messages };
+    }),
+
+  truncateMessages: (index) => set((s) => ({ messages: s.messages.slice(0, index) })),
+
   setStreaming: (isStreaming) => set({ isStreaming }),
+  setAbortController: (abortController) => set({ abortController }),
+  stopStreaming: () => {
+    get().abortController?.abort();
+  },
   resetMessages: () => set({ messages: [] }),
 
   setThreads: (threads) => set({ threads }),

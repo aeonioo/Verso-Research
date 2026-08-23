@@ -1,7 +1,11 @@
 """Core RAG loop: retrieve relevant chunks, build prompt, stream Ollama response.
 
-Fully local — embeddings AND generation both run through Ollama, zero cloud
-dependency, zero API keys, zero rate limits.
+Async generators (not sync) so routes/chat.py can stop pulling tokens the
+instant a client disconnects (real cancellation, not just a hidden UI).
+
+Fully local by default — embeddings AND generation both run through Ollama.
+Web search (use_web=True, opt-in per request) is the one exception that
+talks to the internet.
 """
 
 import ollama
@@ -10,43 +14,35 @@ from config import settings
 from embeddings.embedder import embed_query
 from storage.vector_store import search
 from rag.prompts import build_chat_system_prompt, build_smart_action_prompt
+from rag.web_search import web_search
 
-_client = ollama.Client(host=settings.OLLAMA_BASE_URL)
+_client = ollama.AsyncClient(host=settings.OLLAMA_BASE_URL)
 
 
 def retrieve_context(paper_id: str, query: str, top_k: int | None = None) -> list[dict]:
-    """Embed the query and fetch the top-k most relevant chunks for this paper."""
     query_embedding = embed_query(query)
     return search(paper_id, query_embedding, top_k=top_k)
 
 
 def _format_context(chunks: list[dict]) -> str:
-    return "\n\n".join(
-        f"[Page {c['page']}]\n{c['text']}" for c in chunks
-    )
+    return "\n\n".join(f"[Page {c['page']}]\n{c['text']}" for c in chunks)
 
 
-def stream_chat_response(
+def _format_web_context(results: list[dict]) -> str:
+    return "\n\n".join(f"[Web: {r['title']}]({r['url']})\n{r['snippet']}" for r in results)
+
+
+async def stream_chat_response(
     paper_id: str,
     message: str,
     mode: str = "research",
     history: list[dict] | None = None,
     model: str | None = None,
+    use_web: bool = False,
 ):
-    """
-    Retrieve context, build messages, stream the Ollama completion.
-
-    Yields raw text deltas as they arrive. Caller (routes/chat.py) is
-    responsible for SSE formatting.
-
-    Also returns the retrieved sources via the first yielded item being a
-    dict marker — simpler: caller should call retrieve_context separately
-    if it needs sources before streaming starts. Here we retrieve first,
-    then yield source info as the FIRST item, followed by text chunks.
-    """
     chunks = retrieve_context(paper_id, message)
 
-    MIN_SCORE = 0.35  # cosine similarity threshold
+    MIN_SCORE = 0.35
     if not chunks or chunks[0]["score"] < MIN_SCORE:
         yield {"type": "sources", "data": chunks}
         yield {"type": "token", "data": "I couldn't find strongly relevant content in this paper for that question — try rephrasing, or it may not be covered here."}
@@ -55,28 +51,32 @@ def stream_chat_response(
 
     context = _format_context(chunks)
 
+    web_results = []
+    if use_web:
+        web_results = web_search(message)
+        if web_results:
+            context += "\n\n---\n\nWeb search results:\n\n" + _format_web_context(web_results)
+
     system_prompt = build_chat_system_prompt(mode)
-    user_prompt = (
-        f"Context from the paper:\n\n{context}\n\n"
-        f"---\n\nQuestion: {message}"
-    )
+    user_prompt = f"Context from the paper:\n\n{context}\n\n---\n\nQuestion: {message}"
 
     messages = [{"role": "system", "content": system_prompt}]
     if history:
         messages.extend(history)
     messages.append({"role": "user", "content": user_prompt})
 
-    # first yield: sources, so the frontend can render "sources used" immediately
     yield {"type": "sources", "data": chunks}
+    if web_results:
+        yield {"type": "web_sources", "data": web_results}
 
-    stream = _client.chat(
+    stream = await _client.chat(
         model=model or settings.OLLAMA_MODEL,
         messages=messages,
         stream=True,
         options={"temperature": 0.3, "num_gpu": settings.OLLAMA_NUM_GPU_LAYERS},
     )
 
-    for chunk in stream:
+    async for chunk in stream:
         delta = chunk["message"]["content"]
         if delta:
             yield {"type": "token", "data": delta}
@@ -84,17 +84,14 @@ def stream_chat_response(
     yield {"type": "done", "data": None}
 
 
-def run_smart_action(paper_id: str, selected_text: str, action: str, model: str | None = None):
-    """Same streaming pattern, but for text-selection smart actions (Explain/Derive/etc)."""
-    # pull a bit of surrounding paper context for grounding
+async def run_smart_action(paper_id: str, selected_text: str, action: str, model: str | None = None):
     chunks = retrieve_context(paper_id, selected_text, top_k=3)
     context = _format_context(chunks)
-
     prompt = build_smart_action_prompt(action, selected_text, paper_context=context)
 
     yield {"type": "sources", "data": chunks}
 
-    stream = _client.chat(
+    stream = await _client.chat(
         model=model or settings.OLLAMA_MODEL,
         messages=[
             {"role": "system", "content": "You are Verso, an AI assistant helping a reader understand a research paper excerpt."},
@@ -104,7 +101,7 @@ def run_smart_action(paper_id: str, selected_text: str, action: str, model: str 
         options={"temperature": 0.3, "num_gpu": settings.OLLAMA_NUM_GPU_LAYERS},
     )
 
-    for chunk in stream:
+    async for chunk in stream:
         delta = chunk["message"]["content"]
         if delta:
             yield {"type": "token", "data": delta}
